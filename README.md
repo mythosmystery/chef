@@ -636,7 +636,7 @@ chef [options] [message...]
 ## Development
 
 ```bash
-git clone github.com/hunterbarton/chef
+git clone github.com/mythosmystery/chef
 cd chef
 go build ./cmd/chef
 ./chef
