@@ -2,28 +2,84 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/mythosmystery/chef/internal/workspace"
 )
 
-// Load reads global and project config, merges them, and applies defaults.
-func Load() (*Config, error) {
+// LoadOptions configures config loading.
+type LoadOptions struct {
+	WorkDir       string
+	Flags         FlagOverrides
+	RequireGlobal bool
+}
+
+// LoadResult is the outcome of loading configuration.
+type LoadResult struct {
+	Config      *Config
+	ProjectRoot string
+	NoContext   bool
+}
+
+// Load reads global and project config, merges them, resolves paths, validates,
+// and applies CLI flag overrides.
+func Load(opts LoadOptions) (*LoadResult, error) {
+	workDir := opts.WorkDir
+	if workDir == "" {
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	projectRoot, err := workspace.FindGitRoot(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("config: find project root: %w", err)
+	}
+
 	cfg := Defaults()
 
-	globalPath, err := globalConfigPath()
+	globalPath, err := GlobalConfigPath()
 	if err != nil {
 		return nil, err
 	}
+	if opts.RequireGlobal {
+		if _, err := os.Stat(globalPath); err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrGlobalConfigMissing{Path: globalPath}
+			}
+			return nil, fmt.Errorf("config: %s: %w", globalPath, err)
+		}
+	}
 	if err := mergeFile(&cfg, globalPath); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("config: %s: %w", globalPath, err)
 	}
 
-	projectPath := filepath.Join(".chef", "config.json")
+	projectPath := ProjectConfigPath(projectRoot)
 	if err := mergeFile(&cfg, projectPath); err != nil {
+		return nil, fmt.Errorf("config: %s: %w", projectPath, err)
+	}
+
+	if err := cfg.Resolve(projectRoot); err != nil {
+		return nil, fmt.Errorf("config: resolve paths: %w", err)
+	}
+	if err := Validate(&cfg); err != nil {
+		return nil, err
+	}
+	if err := ApplyFlags(&cfg, opts.Flags); err != nil {
+		return nil, err
+	}
+	if err := Validate(&cfg); err != nil {
 		return nil, err
 	}
 
-	return &cfg, nil
+	return &LoadResult{
+		Config:      &cfg,
+		ProjectRoot: projectRoot,
+		NoContext:   NoContextFromFlags(opts.Flags),
+	}, nil
 }
 
 func mergeFile(cfg *Config, path string) error {
@@ -34,24 +90,11 @@ func mergeFile(cfg *Config, path string) error {
 		}
 		return err
 	}
-	return json.Unmarshal(data, cfg)
+	var overlay fileConfig
+	if err := json.Unmarshal(data, &overlay); err != nil {
+		return err
+	}
+	*cfg = Merge(*cfg, overlay)
+	return nil
 }
 
-func globalConfigPath() (string, error) {
-	dir, err := chefDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "config.json"), nil
-}
-
-func chefDir() (string, error) {
-	if v := os.Getenv("CHEF_DIR"); v != "" {
-		return v, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".chef"), nil
-}

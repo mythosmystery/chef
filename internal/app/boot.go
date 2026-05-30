@@ -1,25 +1,51 @@
 package app
 
 import (
+	"os"
+
 	"github.com/mythosmystery/chef/internal/bus"
 	"github.com/mythosmystery/chef/internal/config"
 )
 
 // Dependencies holds wired subsystems for a chef run.
 type Dependencies struct {
-	Config *config.Config
-	Bus    *bus.Bus
+	Config      *config.Config
+	ProjectRoot string
+	NoContext   bool
+	Bus         *bus.Bus
 }
 
 // boot constructs config, provider, tools, agent, and TUI dependencies.
-func boot() (*Dependencies, error) {
-	cfg, err := config.Load()
+func boot(flags Flags) (*Dependencies, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := config.Load(config.LoadOptions{
+		WorkDir:       cwd,
+		Flags:         flagOverrides(flags),
+		RequireGlobal: true,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &Dependencies{
-		Config: cfg,
-		Bus:    bus.New(),
+		Config:      result.Config,
+		ProjectRoot: result.ProjectRoot,
+		NoContext:   result.NoContext,
+		Bus:         bus.New(),
 	}, nil
+}
+
+func flagOverrides(f Flags) config.FlagOverrides {
+	return config.FlagOverrides{
+		Provider:  f.Provider,
+		Model:     f.Model,
+		Thinking:  f.Thinking,
+		Tools:     f.Tools,
+		NoTools:   f.NoTools,
+		NoContext: f.NoContext,
+	}
 }

@@ -10,7 +10,7 @@ func Defaults() Config {
 		Thinking:            "medium",
 		Tools:               []string{"read", "write", "edit", "bash", "grep", "find", "ls", "context", "diff"},
 		MaxConcurrentAgents: 4,
-		AgentTimeout:        5 * time.Minute,
+		AgentTimeout:        Duration{Duration: 5 * time.Minute},
 		ContextFiles: ContextConfig{
 			Dir: ".chef",
 			Budget: map[string]int{

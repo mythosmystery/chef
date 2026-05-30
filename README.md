@@ -412,55 +412,190 @@ The TUI shows completion suggestions as you type. If content exceeds ~2000 token
 
 ## Project Structure
 
+Chef is organized as a set of deep, single-purpose packages. Each package owns one domain — tools own tool execution, `projctx` owns `.chef/*.md` files, `bus` owns the agent↔TUI seam — and exposes a small interface so subsystems can be swapped or extended without reshaping callers.
+
 ```
 chef/
-├── cmd/chef/              # CLI entrypoint
-│   └── main.go
+├── cmd/chef/                         # binary entrypoint
+│   ├── main.go                       # subcommand dispatch + flag parsing → app.Run
+│   └── flags.go                      # CLI flag definitions
 ├── internal/
-│   ├── tui/               # Charm-based TUI
-│   │   ├── app.go         # tea.Program, top-level Model
-│   │   ├── view.go        # render → string
-│   │   ├── input.go       # textarea / editor with @-ref and /-commands
-│   │   ├── log.go         # scrollable message history
-│   │   ├── plan.go        # plan mode UI (review/edit/execute)
-│   │   ├── agents.go      # mini-agent progress widgets (work + context manager)
-│   │   └── styles.go      # lipgloss theme styles
-│   ├── agent/             # agent core
-│   │   ├── runner.go      # main event loop (prompt → tools → reply)
-│   │   ├── plan.go        # plan generation and DAG execution
-│   │   ├── spawner.go     # mini-agent spawning (work + context + init)
-│   │   ├── merge.go       # diff collection, review, and merge
-│   │   ├── context.go     # context window management
-│   │   └── compact.go     # automatic session compaction
-│   ├── tools/             # tool registry and implementations
-│   │   ├── registry.go    # Tool interface + registry
-│   │   ├── read.go
-│   │   ├── write.go
-│   │   ├── edit.go
-│   │   ├── bash.go
-│   │   ├── grep.go
-│   │   ├── find.go
-│   │   ├── ls.go
-│   │   ├── diff.go        # git diff and last-edit diff
-│   │   └── context.go     # context tool (query/update/scan/compact)
-│   ├── session/           # session persistence
-│   │   ├── store.go       # JSONL read/write
-│   │   └── tree.go        # branching, forking, navigation
-│   └── config/            # settings loading (JSON)
-│       └── config.go
-├── pkg/
-│   └── provider/          # public LLM provider abstraction
-│       ├── provider.go    # Provider interface
-│       ├── anthropic.go
-│       ├── openai.go
-│       └── message.go     # shared message types
-├── assets/
-│   └── logo.svg           # startup banner
+│   ├── cli/                          # CLI subcommands
+│   │   ├── cli.go                    # subcommand registry + dispatch
+│   │   └── config.go                 # chef config setup wizard
+│   ├── app/                          # top-level wiring / DI
+│   │   ├── app.go                    # Run(progName, flags)
+│   │   └── boot.go                   # config → provider → tools → agent → tui
+│   ├── tui/                          # Charm-based TUI (single package)
+│   │   ├── app.go                    # tea.Program, top-level Model
+│   │   ├── view.go                   # render → string
+│   │   ├── input.go                  # textarea editor
+│   │   ├── log.go                    # scrollable message log
+│   │   ├── message.go                # role/message types
+│   │   ├── styles.go                 # lipgloss theme
+│   │   ├── header.go                 # session/model/plan indicator
+│   │   ├── footer.go                 # budget bar, tokens, cwd, model
+│   │   ├── plan.go                   # plan mode UI (review/execute/failure)
+│   │   ├── agents.go                 # mini-agent progress widget
+│   │   ├── init.go                   # context init progress + review
+│   │   ├── review.go                 # generic Approve/Retry/Skip pager
+│   │   ├── thinking.go               # collapsible thinking blocks
+│   │   ├── refs.go                   # @ file completion popup
+│   │   ├── commands.go               # / command completion popup
+│   │   └── events.go                 # tea.Msg types from the agent
+│   ├── agent/                        # agent core
+│   │   ├── agent.go                  # Agent type + lifecycle
+│   │   ├── turn.go                   # prompt → tools → reply for one turn
+│   │   ├── stream.go                 # consume provider stream events
+│   │   ├── compact.go                # session auto-compaction
+│   │   ├── merge.go                  # collect & validate sub-agent diffs
+│   │   ├── role.go                   # mini-agent role configs
+│   │   ├── prompt.go                 # main + plan-generation system prompts
+│   │   ├── plan/                     # plan engine subpackage
+│   │   │   ├── plan.go               # Plan, Step, Status
+│   │   │   ├── dag.go                # dependency DAG, parallel groups
+│   │   │   ├── generate.go           # LLM-driven plan generation
+│   │   │   ├── execute.go            # DAG execution + sub-agent dispatch
+│   │   │   ├── review.go             # conversational plan review
+│   │   │   └── failure.go            # retry / pause / user-choice
+│   │   └── spawn/                    # mini-agent spawning subpackage
+│   │       ├── spawn.go              # Spawner + Spec
+│   │       ├── pool.go               # concurrency limiter
+│   │       ├── queue.go              # priority queue (high=compact)
+│   │       ├── handle.go             # AgentHandle (status/output/cancel)
+│   │       └── timeout.go            # per-agent timeout + cancellation
+│   ├── tool/                         # tool registry + built-in tools
+│   │   ├── tool.go                   # Tool interface, Call, Result
+│   │   ├── registry.go               # Registry + allowlist enforcement
+│   │   ├── read.go / write.go / edit.go
+│   │   ├── bash.go / bash_safety.go  # blocklist + confirmation
+│   │   ├── grep.go / find.go / ls.go / diff.go
+│   │   └── context.go                # delegates to projctx
+│   ├── projctx/                      # .chef/*.md project context system
+│   │   ├── projctx.go                # Manager type
+│   │   ├── files.go                  # 8 known files + per-file budgets
+│   │   ├── parse.go / render.go      # markdown ↔ entries
+│   │   ├── store.go                  # disk I/O, per-file sync.Mutex
+│   │   ├── budget.go                 # token budget enforcement
+│   │   ├── query.go                  # cross-file search w/ attribution
+│   │   ├── scan.go                   # drift detection vs project.md
+│   │   ├── update.go / remove.go     # keyed upsert + pattern remove
+│   │   ├── compact.go                # compaction trigger
+│   │   └── inject.go                 # session preamble builder
+│   ├── session/                      # JSONL persistence + tree
+│   │   ├── session.go                # Session, Message, Part
+│   │   ├── store.go                  # JSONL load/save
+│   │   ├── tree.go                   # parent/child + fork
+│   │   ├── resume.go                 # -c / -r / --session
+│   │   └── id.go                     # ID generation
+│   ├── config/                       # JSON config (global + project)
+│   │   ├── config.go / defaults.go
+│   │   ├── load.go / merge.go / write.go
+│   │   └── validate.go / errors.go
+│   ├── command/                      # slash commands (parsed anywhere)
+│   │   ├── command.go / registry.go / parse.go
+│   │   └── plan.go / context.go / session.go / meta.go
+│   ├── refs/                         # @ file references
+│   │   └── refs.go / parse.go / attach.go / complete.go
+│   ├── workspace/                    # filesystem + path safety
+│   │   ├── workspace.go / walk.go / gitignore.go
+│   │   ├── path.go                   # normalization
+│   │   ├── safety.go                 # blocks .chef/ + session writes
+│   │   └── binary.go                 # binary file detection
+│   ├── diff/                         # used by `diff` tool
+│   │   ├── diff.go / git.go
+│   │   └── tracker.go                # last-edit diff tracker
+│   ├── tokens/                       # token counting (chars/4)
+│   │   └── tokens.go / estimate.go
+│   └── bus/                          # agent ↔ tui event bus
+│       └── bus.go / events.go
+├── pkg/                              # public API
+│   └── provider/                     # LLM provider abstraction
+│       ├── provider.go               # Provider, LightProvider
+│       ├── message.go                # Message, Part, Role
+│       ├── tool.go                   # ToolDef, ToolCall, ToolResult
+│       ├── stream.go                 # StreamEvent variants
+│       ├── thinking.go               # Thinking config
+│       ├── registry.go               # provider registry
+│       ├── openai/openai.go
+│       └── anthropic/anthropic.go
 ├── go.mod
 └── go.sum
 ```
 
+### Module dependency graph
+
+```mermaid
+flowchart TD
+    cmd[cmd/chef] --> app[internal/app]
+    app --> tui[internal/tui]
+    app --> agent[internal/agent]
+    app --> cfg[internal/config]
+    app --> provider[pkg/provider]
+    app --> bus[internal/bus]
+
+    tui <-->|events| bus
+    bus <--> agent
+
+    agent --> tool[internal/tool]
+    agent --> agentplan[internal/agent/plan]
+    agent --> agentspawn[internal/agent/spawn]
+    agent --> session[internal/session]
+    agent --> projctx[internal/projctx]
+    agent --> provider
+
+    agentplan --> agentspawn
+    agentspawn --> provider
+    agentspawn --> tool
+
+    tool --> projctx
+    tool --> workspace[internal/workspace]
+    tool --> diff[internal/diff]
+
+    projctx --> tokens[internal/tokens]
+    projctx --> workspace
+
+    cmds[internal/command] --> agent
+    refs[internal/refs] --> workspace
+    tui --> cmds
+    tui --> refs
+```
+
+### Package responsibilities
+
+| Package | Responsibility |
+|---------|----------------|
+| `cmd/chef` | Binary entrypoint, subcommand dispatch, flag parsing |
+| `internal/cli` | CLI subcommands (`chef config`, etc.) |
+| `internal/app` | Wires every subsystem; owns `Run` |
+| `internal/tui` | All Charm-based presentation |
+| `internal/agent` | Main agent loop, turn handling, compaction, merge |
+| `internal/agent/plan` | Plan generation, DAG, execution, failure handling |
+| `internal/agent/spawn` | Unified mini-agent spawner with pool + priority queue |
+| `internal/tool` | Tool interface, registry, built-in tool implementations |
+| `internal/projctx` | `.chef/*.md` operations (query/scan/update/compact/inject) |
+| `internal/session` | JSONL session persistence with tree branching |
+| `internal/config` | Layered JSON config (global + project) |
+| `internal/command` | Slash command parsing and dispatch |
+| `internal/refs` | `@` file reference parsing, attachment, completion |
+| `internal/workspace` | Path normalization, gitignore, write safety |
+| `internal/diff` | Git diff + last-edit tracker for `diff` tool |
+| `internal/tokens` | Token estimation (chars/4) |
+| `internal/bus` | Async agent → synchronous TUI event bus |
+| `pkg/provider` | Public LLM provider abstraction (extensible) |
+
 ## Configuration
+
+Chef requires a **global config file** before the TUI will start. Run the setup wizard on first use:
+
+```bash
+chef config              # write ~/.chef/config.json
+chef config --project    # write .chef/config.json in the current git repo
+```
+
+The wizard prompts for provider, model, thinking level, theme, and an optional light model for mini-agents. API keys are **not** stored in config — set `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` in your environment after setup.
+
+If you launch chef without a global config, it exits with a message pointing you to `chef config`.
 
 JSON only. Two locations (project overrides global):
 
@@ -589,7 +724,23 @@ When compaction fires, the oldest messages are summarized into a dense summary b
 
 ```bash
 chef [options] [message...]
+chef config [--project]
 ```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `config` | Interactive setup wizard for global or project config |
+
+#### `chef config`
+
+| Flag | Description |
+|------|-------------|
+| `--project` | Write to `.chef/config.json` in the current git repo instead of global config |
+| `-h`, `--help` | Show config command help |
+
+### Options
 
 | Flag | Description |
 |------|-------------|
@@ -628,6 +779,7 @@ chef [options] [message...]
 | TUI Framework | [bubbletea](https://github.com/charmbracelet/bubbletea) |
 | Styling | [lipgloss](https://github.com/charmbracelet/lipgloss) |
 | UI Components | [bubbles](https://github.com/charmbracelet/bubbles) |
+| Config Wizard | [huh](https://github.com/charmbracelet/huh) |
 | LLM Abstraction | [genai](https://github.com/charmbracelet/genai) |
 | Config | JSON (encoding/json) |
 | Sessions | JSONL with tree structure |
@@ -639,6 +791,7 @@ chef [options] [message...]
 git clone github.com/mythosmystery/chef
 cd chef
 go build ./cmd/chef
+chef config    # first-time setup (creates ~/.chef/config.json)
 ./chef
 go test ./...
 go fmt ./...

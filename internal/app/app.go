@@ -2,7 +2,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -41,10 +40,7 @@ func Run(progName string, flags Flags) error {
 		return nil
 	}
 
-	_ = context.Background()
-	_ = flags
-
-	deps, err := boot()
+	deps, err := boot(flags)
 	if err != nil {
 		return err
 	}
@@ -60,6 +56,9 @@ func Run(progName string, flags Flags) error {
 func printHelp(progName string) {
 	fmt.Printf("chef — AI coding agent TUI\n\n")
 	fmt.Printf("Usage: %s [options] [message...]\n\n", progName)
+	fmt.Println("Commands:")
+	fmt.Println("  config           Interactive config setup wizard")
+	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  --init           Initialize project context")
 	fmt.Println("  -c, --continue   Continue most recent session")
@@ -76,6 +75,8 @@ func printHelp(progName string) {
 	fmt.Println("  --verbose        Verbose logging")
 	fmt.Println("  -v, --version    Print version")
 	fmt.Println("  -h, --help       Show help")
+	fmt.Println()
+	fmt.Println("Run 'chef config --help' for config command options.")
 }
 
 // ExitOnError prints err to stderr and exits with code 1.
