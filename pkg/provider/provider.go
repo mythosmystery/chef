@@ -11,10 +11,14 @@ type Provider interface {
 
 // Request is a completion request.
 type Request struct {
-	Model    string
-	Messages []Message
-	Tools    []ToolDef
-	Thinking Thinking
+	Model       string
+	Messages    []Message
+	Tools       []ToolDef
+	Thinking    Thinking
+	Temperature *float64
+	TopP        *float64
+	TopK        *int
+	MaxTokens   int
 }
 
 // LightProvider resolves the light model configuration for mini-agents.

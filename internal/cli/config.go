@@ -12,13 +12,17 @@ import (
 )
 
 type configAnswers struct {
-	Provider      string
-	Model         string
-	Thinking      string
-	Theme         string
-	LightEnabled  bool
-	LightProvider string
-	LightModel    string
+	Provider         string
+	CustomBaseURL    string
+	CustomAPIKeyEnv  string
+	Model            string
+	Thinking         string
+	Theme            string
+	LightEnabled     bool
+	LightProvider    string
+	LightCustomURL   string
+	LightCustomKey   string
+	LightModel       string
 }
 
 func runConfig(progName string, args []string) error {
@@ -55,7 +59,7 @@ func runConfig(progName string, args []string) error {
 	}
 
 	fmt.Printf("Wrote config to %s\n", targetPath)
-	printAPIKeyReminder(answers.Provider, answers.LightEnabled, answers.LightProvider)
+	printAPIKeyReminder(&cfg)
 	return nil
 }
 
@@ -118,6 +122,10 @@ func answersFromConfig(cfg config.Config) configAnswers {
 		a.LightProvider = cfg.Light.Provider
 		a.LightModel = cfg.Light.Model
 	}
+	if pc, ok := cfg.Providers["custom"]; ok {
+		a.CustomBaseURL = pc.BaseURL
+		a.CustomAPIKeyEnv = pc.APIKeyEnv
+	}
 	return a
 }
 
@@ -135,7 +143,28 @@ func buildConfigFromAnswers(base config.Config, a configAnswers) config.Config {
 	} else {
 		cfg.Light = nil
 	}
+	applyCustomProviderConfig(&cfg, a.Provider, a.CustomBaseURL, a.CustomAPIKeyEnv)
+	if a.LightEnabled && a.LightProvider == "custom" {
+		applyCustomProviderConfig(&cfg, "custom", a.LightCustomURL, a.LightCustomKey)
+	}
 	return cfg
+}
+
+func applyCustomProviderConfig(cfg *config.Config, providerName, baseURL, apiKeyEnv string) {
+	if providerName != "custom" {
+		return
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]config.ProviderConfig)
+	}
+	pc := cfg.Providers["custom"]
+	pc.BaseURL = baseURL
+	if apiKeyEnv != "" {
+		pc.APIKeyEnv = apiKeyEnv
+	} else if pc.APIKeyEnv == "" {
+		pc.APIKeyEnv = "CUSTOM_API_KEY"
+	}
+	cfg.Providers["custom"] = pc
 }
 
 func runConfigWizard(a *configAnswers) error {
@@ -144,10 +173,7 @@ func runConfigWizard(a *configAnswers) error {
 			huh.NewSelect[string]().
 				Title("Provider").
 				Description("LLM provider for the main agent").
-				Options(
-					huh.NewOption("OpenAI", "openai"),
-					huh.NewOption("Anthropic", "anthropic"),
-				).
+				Options(providerSelectOptions()...).
 				Value(&a.Provider),
 			huh.NewInput().
 				Title("Model").
@@ -189,6 +215,41 @@ func runConfigWizard(a *configAnswers) error {
 		return err
 	}
 
+	if a.Provider == "custom" {
+		if a.CustomAPIKeyEnv == "" {
+			a.CustomAPIKeyEnv = "CUSTOM_API_KEY"
+		}
+		customForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Base URL").
+					Description("OpenAI-compatible API base URL (e.g. https://host/v1)").
+					Placeholder("https://api.example.com/v1").
+					Value(&a.CustomBaseURL).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("base URL is required for custom provider")
+						}
+						return nil
+					}),
+				huh.NewInput().
+					Title("API key env var").
+					Description("Environment variable name holding the API key").
+					Placeholder("CUSTOM_API_KEY").
+					Value(&a.CustomAPIKeyEnv).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("API key env var name is required")
+						}
+						return nil
+					}),
+			),
+		)
+		if err := customForm.Run(); err != nil {
+			return err
+		}
+	}
+
 	if a.LightEnabled {
 		if a.LightProvider == "" {
 			a.LightProvider = a.Provider
@@ -198,10 +259,7 @@ func runConfigWizard(a *configAnswers) error {
 				huh.NewSelect[string]().
 					Title("Light provider").
 					Description("Provider for mini-agents").
-					Options(
-						huh.NewOption("OpenAI", "openai"),
-						huh.NewOption("Anthropic", "anthropic"),
-					).
+					Options(providerSelectOptions()...).
 					Value(&a.LightProvider),
 				huh.NewInput().
 					Title("Light model").
@@ -219,25 +277,93 @@ func runConfigWizard(a *configAnswers) error {
 		if err := lightForm.Run(); err != nil {
 			return err
 		}
+
+		if a.LightProvider == "custom" {
+			if a.LightCustomKey == "" {
+				a.LightCustomKey = "CUSTOM_API_KEY"
+			}
+			if a.LightCustomURL == "" {
+				a.LightCustomURL = a.CustomBaseURL
+			}
+			lightCustomForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Light base URL").
+						Description("OpenAI-compatible API base URL for mini-agents").
+						Placeholder("https://api.example.com/v1").
+						Value(&a.LightCustomURL).
+						Validate(func(s string) error {
+							if s == "" {
+								return fmt.Errorf("base URL is required for custom provider")
+							}
+							return nil
+						}),
+					huh.NewInput().
+						Title("Light API key env var").
+						Value(&a.LightCustomKey).
+						Validate(func(s string) error {
+							if s == "" {
+								return fmt.Errorf("API key env var name is required")
+							}
+							return nil
+						}),
+				),
+			)
+			if err := lightCustomForm.Run(); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
 }
 
-func printAPIKeyReminder(provider string, lightEnabled bool, lightProvider string) {
-	needsOpenAI := provider == "openai" || (lightEnabled && lightProvider == "openai")
-	needsAnthropic := provider == "anthropic" || (lightEnabled && lightProvider == "anthropic")
+func providerSelectOptions() []huh.Option[string] {
+	return []huh.Option[string]{
+		huh.NewOption("OpenAI", "openai"),
+		huh.NewOption("Anthropic", "anthropic"),
+		huh.NewOption("Custom (OpenAI-compatible)", "custom"),
+	}
+}
 
-	if !needsOpenAI && !needsAnthropic {
+func printAPIKeyReminder(cfg *config.Config) {
+	envVars := collectAPIKeyEnvs(cfg)
+	if len(envVars) == 0 {
 		return
 	}
-
 	fmt.Println()
 	fmt.Println("Set your API key(s) in the environment:")
-	if needsOpenAI {
-		fmt.Println("  export OPENAI_API_KEY=...")
+	for _, env := range envVars {
+		fmt.Printf("  export %s=...\n", env)
 	}
-	if needsAnthropic {
-		fmt.Println("  export ANTHROPIC_API_KEY=...")
+}
+
+func collectAPIKeyEnvs(cfg *config.Config) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(name string, pc config.ProviderConfig) {
+		env := pc.APIKeyEnv
+		if env == "" {
+			switch name {
+			case "openai":
+				env = "OPENAI_API_KEY"
+			case "anthropic":
+				env = "ANTHROPIC_API_KEY"
+			default:
+				return
+			}
+		}
+		if _, ok := seen[env]; ok {
+			return
+		}
+		seen[env] = struct{}{}
+		out = append(out, env)
 	}
+	mainName, _ := cfg.MainModel()
+	add(mainName, cfg.ActiveProviderConfig())
+	lightName, _ := cfg.LightModel()
+	if lightName != mainName {
+		add(lightName, cfg.LightProviderConfig())
+	}
+	return out
 }

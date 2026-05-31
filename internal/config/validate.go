@@ -15,7 +15,10 @@ var knownContextFiles = map[string]struct{}{
 var knownProviders = map[string]struct{}{
 	"openai":    {},
 	"anthropic": {},
+	"custom":    {},
 }
+
+const providerList = "openai|anthropic|custom"
 
 var knownTools = map[string]struct{}{
 	"read": {}, "write": {}, "edit": {}, "bash": {}, "grep": {},
@@ -33,16 +36,19 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("config: provider is required")
 	}
 	if _, ok := knownProviders[cfg.Provider]; !ok {
-		return fmt.Errorf("config: invalid provider %q (want openai|anthropic)", cfg.Provider)
+		return fmt.Errorf("config: invalid provider %q (want %s)", cfg.Provider, providerList)
 	}
 	if cfg.Model == "" {
 		return fmt.Errorf("config: model is required")
+	}
+	if err := validateProviderSettings(cfg.Provider, cfg.ActiveProviderConfig()); err != nil {
+		return err
 	}
 
 	if cfg.Light != nil {
 		if cfg.Light.Provider != "" {
 			if _, ok := knownProviders[cfg.Light.Provider]; !ok {
-				return fmt.Errorf("config: invalid light.provider %q (want openai|anthropic)", cfg.Light.Provider)
+				return fmt.Errorf("config: invalid light.provider %q (want %s)", cfg.Light.Provider, providerList)
 			}
 		}
 		lp, lm := cfg.LightModel()
@@ -51,6 +57,22 @@ func Validate(cfg *Config) error {
 		}
 		if lm == "" {
 			return fmt.Errorf("config: light model is required")
+		}
+		lightName, _ := cfg.LightModel()
+		if err := validateProviderSettings(lightName, cfg.LightProviderConfig()); err != nil {
+			return err
+		}
+	}
+
+	if err := validateSampling(cfg.Sampling); err != nil {
+		return err
+	}
+	if cfg.MaxTurns < 1 {
+		return fmt.Errorf("config: maxTurns must be >= 1, got %d", cfg.MaxTurns)
+	}
+	for name, pc := range cfg.Providers {
+		if err := validateProviderEntry(name, pc); err != nil {
+			return err
 		}
 	}
 
@@ -93,6 +115,45 @@ func Validate(cfg *Config) error {
 	}
 
 	_ = provider.ParseThinking(cfg.Thinking)
+	return nil
+}
+
+func validateProviderSettings(providerName string, pc ProviderConfig) error {
+	if providerName == "custom" && pc.BaseURL == "" {
+		return fmt.Errorf("config: providers.custom.baseURL is required when provider is custom")
+	}
+	return nil
+}
+
+func validateProviderEntry(name string, pc ProviderConfig) error {
+	if pc.Timeout.Duration < 0 {
+		return fmt.Errorf("config: providers.%s.timeout must be >= 0", name)
+	}
+	if pc.MaxRetries < 0 {
+		return fmt.Errorf("config: providers.%s.maxRetries must be >= 0", name)
+	}
+	return nil
+}
+
+func validateSampling(s SamplingConfig) error {
+	if s.Temperature != nil {
+		t := *s.Temperature
+		if t < 0 || t > 2 {
+			return fmt.Errorf("config: sampling.temperature must be in [0, 2], got %v", t)
+		}
+	}
+	if s.TopP != nil {
+		p := *s.TopP
+		if p < 0 || p > 1 {
+			return fmt.Errorf("config: sampling.topP must be in [0, 1], got %v", p)
+		}
+	}
+	if s.TopK != nil && *s.TopK < 0 {
+		return fmt.Errorf("config: sampling.topK must be >= 0, got %d", *s.TopK)
+	}
+	if s.MaxTokens != nil && *s.MaxTokens <= 0 {
+		return fmt.Errorf("config: sampling.maxTokens must be > 0, got %d", *s.MaxTokens)
+	}
 	return nil
 }
 

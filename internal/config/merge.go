@@ -12,6 +12,15 @@ func Merge(base Config, overlay fileConfig) Config {
 	if overlay.Model != nil {
 		out.Model = *overlay.Model
 	}
+	if len(overlay.Providers) > 0 {
+		out.Providers = mergeProviders(out.Providers, overlay.Providers)
+	}
+	if overlay.Sampling != nil {
+		out.Sampling = mergeSampling(out.Sampling, *overlay.Sampling)
+	}
+	if overlay.MaxTurns != nil {
+		out.MaxTurns = *overlay.MaxTurns
+	}
 	if overlay.Thinking != nil {
 		out.Thinking = *overlay.Thinking
 	}
@@ -40,6 +49,74 @@ func Merge(base Config, overlay fileConfig) Config {
 		out.Bash = mergeBash(out.Bash, *overlay.Bash)
 	}
 
+	return out
+}
+
+func mergeProviders(base map[string]ProviderConfig, overlay map[string]providerOverlay) map[string]ProviderConfig {
+	if base == nil {
+		base = make(map[string]ProviderConfig, len(overlay))
+	}
+	out := make(map[string]ProviderConfig, len(base)+len(overlay))
+	for k, v := range base {
+		out[k] = v
+	}
+	for name, o := range overlay {
+		out[name] = mergeProvider(out[name], o)
+	}
+	return out
+}
+
+func mergeProvider(base ProviderConfig, overlay providerOverlay) ProviderConfig {
+	out := base
+	if overlay.BaseURL != nil {
+		out.BaseURL = *overlay.BaseURL
+	}
+	if overlay.APIKeyEnv != nil {
+		out.APIKeyEnv = *overlay.APIKeyEnv
+	}
+	if overlay.Organization != nil {
+		out.Organization = *overlay.Organization
+	}
+	if overlay.Project != nil {
+		out.Project = *overlay.Project
+	}
+	if overlay.Version != nil {
+		out.Version = *overlay.Version
+	}
+	if overlay.Beta != nil {
+		out.Beta = append([]string(nil), (*overlay.Beta)...)
+	}
+	if len(overlay.Headers) > 0 {
+		if out.Headers == nil {
+			out.Headers = make(map[string]string, len(overlay.Headers))
+		}
+		for k, v := range overlay.Headers {
+			out.Headers[k] = v
+		}
+	}
+	if overlay.Timeout != nil {
+		out.Timeout = *overlay.Timeout
+	}
+	if overlay.MaxRetries != nil {
+		out.MaxRetries = *overlay.MaxRetries
+	}
+	return out
+}
+
+func mergeSampling(base SamplingConfig, overlay samplingOverlay) SamplingConfig {
+	out := base
+	if overlay.Temperature != nil {
+		out.Temperature = overlay.Temperature
+	}
+	if overlay.TopP != nil {
+		out.TopP = overlay.TopP
+	}
+	if overlay.TopK != nil {
+		out.TopK = overlay.TopK
+	}
+	if overlay.MaxTokens != nil {
+		out.MaxTokens = overlay.MaxTokens
+	}
 	return out
 }
 

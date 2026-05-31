@@ -115,5 +115,43 @@ func TestLightModelFallback(t *testing.T) {
 	}
 }
 
+func TestMergeProvidersMap(t *testing.T) {
+	base := Defaults()
+	got := Merge(base, fileConfig{
+		Providers: map[string]providerOverlay{
+			"custom": {BaseURL: strPtr("https://host/v1"), APIKeyEnv: strPtr("MY_KEY")},
+		},
+	})
+	if got.Providers["custom"].BaseURL != "https://host/v1" {
+		t.Fatalf("custom baseURL = %q", got.Providers["custom"].BaseURL)
+	}
+	if got.Providers["openai"].APIKeyEnv != "OPENAI_API_KEY" {
+		t.Fatalf("openai entry lost: %+v", got.Providers["openai"])
+	}
+}
+
+func TestMergeSampling(t *testing.T) {
+	base := Defaults()
+	temp := 0.5
+	got := Merge(base, fileConfig{
+		Sampling: &samplingOverlay{Temperature: &temp, MaxTokens: intPtr(2048)},
+	})
+	if got.Sampling.Temperature == nil || *got.Sampling.Temperature != 0.5 {
+		t.Fatalf("temperature = %v", got.Sampling.Temperature)
+	}
+	if got.Sampling.MaxTokens == nil || *got.Sampling.MaxTokens != 2048 {
+		t.Fatalf("maxTokens = %v", got.Sampling.MaxTokens)
+	}
+}
+
+func TestMergeMaxTurns(t *testing.T) {
+	base := Defaults()
+	got := Merge(base, fileConfig{MaxTurns: intPtr(100)})
+	if got.MaxTurns != 100 {
+		t.Fatalf("maxTurns = %d, want 100", got.MaxTurns)
+	}
+}
+
 func strPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
+func intPtr(n int) *int       { return &n }

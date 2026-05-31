@@ -593,7 +593,7 @@ chef config              # write ~/.chef/config.json
 chef config --project    # write .chef/config.json in the current git repo
 ```
 
-The wizard prompts for provider, model, thinking level, theme, and an optional light model for mini-agents. API keys are **not** stored in config — set `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` in your environment after setup.
+The wizard prompts for provider (OpenAI, Anthropic, or a custom OpenAI-compatible endpoint), model, thinking level, theme, and an optional light model for mini-agents. API keys are **not** stored in config — each provider uses an `apiKeyEnv` field naming the environment variable to read (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CUSTOM_API_KEY`).
 
 If you launch chef without a global config, it exits with a message pointing you to `chef config`.
 
@@ -608,11 +608,31 @@ JSON only. Two locations (project overrides global):
 {
   "provider": "openai",
   "model": "gpt-4o",
+  "providers": {
+    "openai": { "apiKeyEnv": "OPENAI_API_KEY" },
+    "anthropic": {
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "baseURL": "https://api.anthropic.com",
+      "version": "2023-06-01",
+      "beta": ["prompt-caching-2024-07-31"],
+      "timeout": "60s",
+      "maxRetries": 2
+    },
+    "custom": {
+      "baseURL": "https://my-host/v1",
+      "apiKeyEnv": "MY_API_KEY",
+      "headers": { "X-Extra": "v" },
+      "timeout": "60s",
+      "maxRetries": 2
+    }
+  },
   "light": {
     "provider": "openai",
     "model": "gpt-4o-mini"
   },
   "thinking": "medium",
+  "sampling": { "temperature": 0.2, "topP": 1.0, "topK": 0, "maxTokens": 4096 },
+  "maxTurns": 50,
   "tools": ["read", "write", "edit", "bash", "grep", "find", "ls", "context", "diff"],
   "maxConcurrentAgents": 4,
   "agentTimeout": "5m",
@@ -766,8 +786,9 @@ chef config [--project]
 |----------|-------------|
 | `CHEF_DIR` | Override config directory (default: `~/.chef`) |
 | `CHEF_OFFLINE` | Disable startup network calls |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key (when `providers.anthropic.apiKeyEnv` is unset) |
+| `OPENAI_API_KEY` | OpenAI API key (when `providers.openai.apiKeyEnv` is unset) |
+| *(custom)* | Set the env var named in `providers.custom.apiKeyEnv` (default wizard: `CUSTOM_API_KEY`) |
 
 ---
 

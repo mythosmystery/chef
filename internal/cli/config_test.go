@@ -85,13 +85,44 @@ func TestAnswersFromConfig(t *testing.T) {
 
 func TestPrintAPIKeyReminderProviders(t *testing.T) {
 	t.Run("openai only", func(t *testing.T) {
-		// smoke test: should not panic
-		printAPIKeyReminder("openai", false, "")
+		cfg := config.Defaults()
+		printAPIKeyReminder(&cfg)
 	})
 	t.Run("anthropic only", func(t *testing.T) {
-		printAPIKeyReminder("anthropic", false, "")
+		cfg := config.Defaults()
+		cfg.Provider = "anthropic"
+		printAPIKeyReminder(&cfg)
 	})
 	t.Run("mixed light provider", func(t *testing.T) {
-		printAPIKeyReminder("openai", true, "anthropic")
+		cfg := config.Defaults()
+		cfg.Light = &config.LightConfig{Provider: "anthropic", Model: "claude-haiku"}
+		printAPIKeyReminder(&cfg)
 	})
+	t.Run("custom provider", func(t *testing.T) {
+		cfg := config.Defaults()
+		cfg.Provider = "custom"
+		cfg.Providers["custom"] = config.ProviderConfig{
+			BaseURL:   "https://example.com/v1",
+			APIKeyEnv: "MY_KEY",
+		}
+		printAPIKeyReminder(&cfg)
+	})
+}
+
+func TestBuildConfigFromAnswersCustom(t *testing.T) {
+	base := config.Defaults()
+	cfg := buildConfigFromAnswers(base, configAnswers{
+		Provider:        "custom",
+		CustomBaseURL:   "https://example.com/v1",
+		CustomAPIKeyEnv: "MY_KEY",
+		Model:           "llama-3.1-70b",
+		Thinking:        "medium",
+		Theme:           "dark",
+	})
+	if cfg.Providers["custom"].BaseURL != "https://example.com/v1" {
+		t.Fatalf("custom baseURL = %q", cfg.Providers["custom"].BaseURL)
+	}
+	if err := config.Validate(&cfg); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
 }

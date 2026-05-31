@@ -5,14 +5,17 @@ import (
 
 	"github.com/mythosmystery/chef/internal/bus"
 	"github.com/mythosmystery/chef/internal/config"
+	"github.com/mythosmystery/chef/pkg/provider"
 )
 
 // Dependencies holds wired subsystems for a chef run.
 type Dependencies struct {
-	Config      *config.Config
-	ProjectRoot string
-	NoContext   bool
-	Bus         *bus.Bus
+	Config        *config.Config
+	ProjectRoot   string
+	NoContext     bool
+	Bus           *bus.Bus
+	Provider      provider.Provider
+	LightProvider provider.Provider
 }
 
 // boot constructs config, provider, tools, agent, and TUI dependencies.
@@ -31,11 +34,18 @@ func boot(flags Flags) (*Dependencies, error) {
 		return nil, err
 	}
 
+	mainProv, lightProv, err := buildProviders(result.Config)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Dependencies{
-		Config:      result.Config,
-		ProjectRoot: result.ProjectRoot,
-		NoContext:   result.NoContext,
-		Bus:         bus.New(),
+		Config:        result.Config,
+		ProjectRoot:   result.ProjectRoot,
+		NoContext:     result.NoContext,
+		Bus:           bus.New(),
+		Provider:      mainProv,
+		LightProvider: lightProv,
 	}, nil
 }
 
